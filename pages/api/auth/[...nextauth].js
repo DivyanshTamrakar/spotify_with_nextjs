@@ -1,6 +1,35 @@
 import NextAuth from "next-auth"
 import SpotifyProvider from "next-auth/providers/spotify";
-import { LOGIN_URL } from "../../../lib/spotify";
+import spotifyApi, { LOGIN_URL } from "../../../lib/spotify";
+
+
+async function refreshAccessToken(token) {
+    try {
+
+        spotifyApi.setAccessToken(token.accessToken);
+        spotifyApi.setRefreshToken(token.refresToken);
+        const { body: refreshedToken } = await spotifyApi.refreshAccessToken();
+        console.log("refreshed Token :", refreshedToken)
+        return {
+            ...token,
+            accessToken: refreshedToken.access_token,
+            accessTokenExpires: Date.now + refreshedToken.expires_in * 1000,
+            refresToken: refreshedToken.refresh_token ?? token.refresToken,
+
+        }
+
+    } catch (error) {
+        console.log(error);
+        return {
+            ...token,
+            error: "refreshedAccessTokenError"
+        }
+
+    }
+}
+
+
+
 
 export default NextAuth({
     // Configure one or more authentication providers
@@ -14,5 +43,35 @@ export default NextAuth({
     secret: process.env.JWT_SECRET,
     pages: {
         signIn: '/login',
-      }
+    },
+    callbacks: {
+        async jwt({ token, account, user }) {
+            if (account && user) {
+                return {
+                    ...token,
+                    accessToken: account.access_token,
+                    refresToken: account.refresh_token,
+                    username: account.providerAccountId,
+                    accessTokenExpires: account.expires_at * 1000
+
+                }
+            }
+            //if Tokem is not expired yet
+            if (Date.now < token.accessTokenExpires) {
+                console.log("Existing token is valid ")
+                return token
+            }
+
+            // if token expire, then we have to refresh itn
+            console.log("Token expired , refreshin a token")
+            return await refreshAccessToken(token)
+
+        },
+        async session({ session, token }) {
+            session.user.accessToken = token.accessToken;
+            session.user.refresToken = token.refresToken
+            session.user.username = token.username;
+            return session;
+        }
+    }
 })
